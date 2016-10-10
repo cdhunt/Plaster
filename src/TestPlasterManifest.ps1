@@ -26,6 +26,7 @@
 #>
 function Test-PlasterManifest {
     [CmdletBinding()]
+    [OutputType([System.Xml.XmlDocument])]
     param(
         # Specifies a path to a plasterManifest.xml file.
         [Parameter(Position=0,
@@ -40,10 +41,16 @@ function Test-PlasterManifest {
     )
 
     begin {
-        $targetNamespace = "http://www.microsoft.com/schemas/PowerShell/Plaster/v1"
         $schemaPath = "$PSScriptRoot\Schema\PlasterManifest-v1.xsd"
-        $xmlSchemaSet = New-Object System.Xml.Schema.XmlSchemaSet
-        $null = $xmlSchemaSet.Add($targetNamespace, $schemaPath)
+
+        # Schema validation is not available on .NET Core - at the moment.
+        if ('System.Xml.Schema.XmlSchemaSet' -as [type]) {
+            $xmlSchemaSet = New-Object System.Xml.Schema.XmlSchemaSet
+            $xmlSchemaSet.Add($targetNamespace, $schemaPath) > $null
+        }
+        else {
+            $PSCmdLet.WriteWarning($LocalizedData.TestPlasterNoXmlSchemaValidationWarning)
+        }
     }
 
     process {
@@ -53,13 +60,13 @@ function Test-PlasterManifest {
             $ex = New-Object System.Management.Automation.ItemNotFoundException ($LocalizedData.ErrorPathDoesNotExist_F1 -f $Path)
             $category = [System.Management.Automation.ErrorCategory]::ObjectNotFound
             $errRecord = New-Object System.Management.Automation.ErrorRecord $ex,'PathNotFound',$category,$Path
-            $psCmdlet.WriteError($errRecord)
+            $PSCmdLet.WriteError($errRecord)
             return
         }
 
         $filename = Split-Path $Path -Leaf
 
-        # Verify the manifest has the correct filename.
+        # Verify the manifest has the correct filename. Allow for localized template manifest files as well.
         if (!(($filename -eq 'plasterManifest.xml') -or ($filename -match 'plasterManifest_[a-zA-Z]+(-[a-zA-Z]+){0,2}.xml'))) {
             Write-Error ($LocalizedData.ManifestWrongFilename_F1 -f $filename)
             return
@@ -95,22 +102,29 @@ function Test-PlasterManifest {
 
         # Configure an XmlReader and XmlReaderSettings to perform schema validation on xml file.
         $xmlReaderSettings = New-Object System.Xml.XmlReaderSettings
-        $xmlReaderSettings.ValidationFlags = [System.Xml.Schema.XmlSchemaValidationFlags]::ReportValidationWarnings
-        $xmlReaderSettings.ValidationType = [System.Xml.ValidationType]::Schema
-        $xmlReaderSettings.Schemas = $xmlSchemaSet
 
-        # Event handler scriptblock for the ValidationEventHandler event.
-        $validationEventHandler = {
-            param($sender, $eventArgs)
-
-            if ($eventArgs.Severity -eq [System.Xml.Schema.XmlSeverityType]::Error)
-            {
-                Write-Verbose ($LocalizedData.ManifestSchemaValidationError_F1 -f $eventArgs.Message)
-                $manifestIsValid.Value = $false
-            }
+        # Schema validation is not available on .NET Core - at the moment.
+        if ($xmlSchemaSet) {
+            $xmlReaderSettings.ValidationFlags = [System.Xml.Schema.XmlSchemaValidationFlags]::ReportValidationWarnings
+            $xmlReaderSettings.ValidationType = [System.Xml.ValidationType]::Schema
+            $xmlReaderSettings.Schemas = $xmlSchemaSet
         }
 
-        $xmlReaderSettings.add_ValidationEventHandler($validationEventHandler)
+        # Schema validation is not available on .NET Core - at the moment.
+        if ($xmlSchemaSet) {
+            # Event handler scriptblock for the ValidationEventHandler event.
+            $validationEventHandler = {
+                param($sender, $eventArgs)
+
+                if ($eventArgs.Severity -eq [System.Xml.Schema.XmlSeverityType]::Error)
+                {
+                    Write-Verbose ($LocalizedData.ManifestSchemaValidationError_F1 -f $eventArgs.Message)
+                    $manifestIsValid.Value = $false
+                }
+            }
+
+            $xmlReaderSettings.add_ValidationEventHandler($validationEventHandler)
+        }
 
         [System.Xml.XmlReader]$xmlReader = $null
         try {
@@ -118,18 +132,38 @@ function Test-PlasterManifest {
             while ($xmlReader.Read()) {}
         }
         catch {
-            Write-Error ($LocalizedData.ManifestErrorReading_F1 -f $_.Message)
+            Write-Error ($LocalizedData.ManifestErrorReading_F1 -f $_)
             $manifestIsValid.Value = $false
         }
         finally {
-            $xmlReaderSettings.remove_ValidationEventHandler($validationEventHandler)
+            # Schema validation is not available on .NET Core - at the moment.
+            if ($xmlSchemaSet) {
+                $xmlReaderSettings.remove_ValidationEventHandler($validationEventHandler)
+            }
             if ($xmlReader) { $xmlReader.Dispose() }
+        }
+
+        # Validate that the requireModule attribute requiredVersion is mutually exclusive from both
+        # the version and maximumVersion attributes.
+        $requireModules= Select-Xml -Xml $manifest -XPath '//tns:requireModule' -Namespace @{tns = $targetNamespace}
+        foreach ($requireModuleInfo in $requireModules) {
+            $requireModuleNode = $requireModuleInfo.Node
+            if ($requireModuleNode.requiredVersion -and ($requireModuleNode.minimumVersion -or $requireModuleNode.maximumVersion)) {
+                $PSCmdLet.WriteVerbose($LocalizedData.ManifestSchemaInvalidRequireModuleAttrs_F1 -f $requireModuleNode.name)
+                $manifestIsValid.Value = $false
+            }
         }
 
         if ($manifestIsValid.Value) {
             $manifestSchemaVersion = [System.Version]$manifest.plasterManifest.schemaVersion
-            if ($manifestSchemaVersion -gt $LatestSupportedSchemaVersion) {
-                throw ($LocalizedData.ManifestSchemaVersionNotSupported_F1 -f $manifestSchemaVersion)
+
+            # Use a simplified form (no patch version) of semver for checking XML schema version compatibility.
+            if (($manifestSchemaVersion.Major -gt $LatestSupportedSchemaVersion.Major) -or
+                (($manifestSchemaVersion.Major -eq $LatestSupportedSchemaVersion.Major) -and
+                 ($manifestSchemaVersion.Minor -gt $LatestSupportedSchemaVersion.Minor))) {
+
+                Write-Error ($LocalizedData.ManifestSchemaVersionNotSupported_F1 -f $manifestSchemaVersion)
+                return
             }
 
             $manifest

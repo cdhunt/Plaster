@@ -10,7 +10,7 @@
 	targetNamespace="http://www.microsoft.com/schemas/PowerShell/Plaster/v1"
 	elementFormDefault="qualified"
   attributeFormDefault="unqualified"
-  version="0.3"
+  version="0.4"
   xml:lang="en"
 	xmlns:vs="http://schemas.microsoft.com/Visual-Studio-Intellisense"
 		vs:friendlyname="Plaster Manifest Schema"
@@ -66,14 +66,47 @@
     </xs:restriction>
   </xs:simpleType>
 
-  <xs:simpleType name="SchemaVersionType">
+  <xs:simpleType name="NameType">
     <xs:annotation>
       <xs:documentation>
-        A schemaVersion value must be of the form major.minor
+        Required name type that must use valid filename characters [0-9aA-aZ_-]+
       </xs:documentation>
     </xs:annotation>
     <xs:restriction base="xs:string">
-      <xs:pattern value="[0-9]{1,4}\.[0-9]{1,4}" />
+      <xs:pattern value="[0-9a-zA-Z_-]+" />
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ModuleVersionType">
+    <xs:annotation>
+      <xs:documentation>
+        A module version specification value must be of the form of major.minor.[patch[.revision][(+|-).*]]
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\d+\.\d+(\.\d+((\.\d+|(\+|-).*)?)?)?" />
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="SchemaVersionType">
+    <xs:annotation>
+      <xs:documentation>
+        The schemaVersion value must be of the form major.minor
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\d{1,4}\.\d{1,4}" />
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="TemplateVersionType">
+    <xs:annotation>
+      <xs:documentation>
+        A template version value must be of the form major.minor[.patch]
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\d{1,4}\.\d{1,4}(\.\d{1,4})?" />
     </xs:restriction>
   </xs:simpleType>
 
@@ -215,14 +248,24 @@
           </xs:annotation>
           <xs:complexType>
             <xs:all>
-              <xs:element name="id" maxOccurs="1" minOccurs="1" type="xs:string">
+              <xs:element name="name" maxOccurs="1" minOccurs="1" type="ptd:NameType">
                 <xs:annotation>
-                  <xs:documentation>The unique identifier for the Plaster template.</xs:documentation>
+                  <xs:documentation>The name of the template. DO NOT LOCALIZE THIS STRING.</xs:documentation>
                 </xs:annotation>
               </xs:element>
-              <xs:element name="version" maxOccurs="1" minOccurs="1" type="xs:string">
+              <xs:element name="id" maxOccurs="1" minOccurs="1" type="xs:string">
                 <xs:annotation>
-                  <xs:documentation>The version of the package, in a format like `1.2.3`.</xs:documentation>
+                  <xs:documentation>The unique identifier for the template.</xs:documentation>
+                </xs:annotation>
+              </xs:element>
+              <xs:element name="version" maxOccurs="1" minOccurs="1" type="ptd:TemplateVersionType">
+                <xs:annotation>
+                  <xs:documentation>The version of the template in a format like '1.2[.3]'.</xs:documentation>
+                </xs:annotation>
+              </xs:element>
+              <xs:element name="title" maxOccurs="1" minOccurs="1" type="xs:string">
+                <xs:annotation>
+                  <xs:documentation>The "display name" used in an editor user interface.</xs:documentation>
                 </xs:annotation>
               </xs:element>
               <xs:element name="description" maxOccurs="1" minOccurs="1" type="xs:string">
@@ -230,14 +273,14 @@
                   <xs:documentation>Description of what the template scaffolds.</xs:documentation>
                 </xs:annotation>
               </xs:element>
-              <xs:element name="title" maxOccurs="1" minOccurs="0" type="xs:string">
+              <xs:element name="author" maxOccurs="1" minOccurs="0" type="xs:string">
                 <xs:annotation>
-                  <xs:documentation>The human-friendly title of the package displayed in the Manage NuGet Packages dialog. If none is specified, the ID is used instead.</xs:documentation>
+                  <xs:documentation>The template author.</xs:documentation>
                 </xs:annotation>
               </xs:element>
               <xs:element name="tags" maxOccurs="1" minOccurs="1" type="xs:string">
                 <xs:annotation>
-                  <xs:documentation>A comma-separated list of authors of the package code.</xs:documentation>
+                  <xs:documentation>A comma-separated list of tags.</xs:documentation>
                 </xs:annotation>
               </xs:element>
             </xs:all>
@@ -385,6 +428,47 @@
                   </xs:attribute>
                   <xs:attribute name="condition" type="ptd:condition"/>
                   <xs:attribute name="encoding" type="ptd:encoding" default="Default"/>
+                </xs:complexType>
+              </xs:element>
+
+              <xs:element name="requireModule" maxOccurs="unbounded" minOccurs="0">
+                <xs:annotation>
+                  <xs:documentation>Checks to see if the specified module is installed. If not, the user is notified of the need to install the module.</xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                  <xs:attribute name="name" type="xs:string" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Specifies the module's name.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="minimumVersion" type="ptd:ModuleVersionType">
+                    <xs:annotation>
+                      <xs:documentation>Specifies the module's minimum version.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="maximumVersion" type="ptd:ModuleVersionType">
+                    <xs:annotation>
+                      <xs:documentation>Specifies the module's maximum version.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="requiredVersion" type="ptd:ModuleVersionType">
+                    <xs:annotation>
+                      <xs:documentation>
+                        Specifies the module's required version. This version must match the installed module's version number EXACTLY.
+                        Use this attribute rarely as any update to the module that changes its version will result in this check failing.
+                        The requiredVersion attribute cannot be used together with either the version or maximumVersion attributes.
+                      </xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="condition" type="ptd:condition"/>
+                  <xs:attribute name="message" type="xs:string">
+                    <xs:annotation>
+                      <xs:documentation>
+                        Specifies a custom message to display after the standard Plaster message when the specified module's is not available on the target machine.
+                        Use this message to tell the user what functionality will not work without the specified module.
+                      </xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
                 </xs:complexType>
               </xs:element>
 

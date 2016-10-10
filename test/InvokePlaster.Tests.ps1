@@ -1,8 +1,8 @@
 . $PSScriptRoot\Shared.ps1
 
-Describe 'TemplateFile Directive Tests' {
-    Context 'Invalid template files' {
-        It 'It does not crash on an empty template file' {
+Describe 'Invoke-Plaster Tests' {
+    Context 'Parameters' {
+        It 'DestinationPath creates directory if it doesn''t exist' {
             CleanDir $TemplateDir
             CleanDir $OutDir
 
@@ -18,16 +18,18 @@ Describe 'TemplateFile Directive Tests' {
         <tags></tags>
     </metadata>
     <content>
-        <templateFile source='Recurse\empty.txt' destination='empty.txt'/>
+        <file source='Recurse\foo.txt' destination='foo.txt'/>
     </content>
 </plasterManifest>
 "@ | Out-File $PlasterManifestPath -Encoding utf8
 
             Copy-Item $PSScriptRoot\Recurse $TemplateDir -Recurse
 
-            Invoke-Plaster -TemplatePath $TemplateDir -DestinationPath $OutDir -NoLogo 6> $null
+            $DestPath = Join-Path $OutDir Foo
 
-            Get-Item $OutDir\empty.txt | Foreach-Object Length | Should BeExactly 0
+            Invoke-Plaster -TemplatePath $TemplateDir -DestinationPath $DestPath -NoLogo 6> $null
+
+            Test-Path -LiteralPath $DestPath\foo.txt | Should Be $true
         }
     }
 }
